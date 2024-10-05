@@ -84,7 +84,7 @@ def parse_text(text):
     for i, line in enumerate(lines):    # 遍历每一行，检查是否包含代码快的标记  ```
         if "```" in line:   # 检查当前行是否包含代码块的标记
             count += 1  # 每一次找到代码块标记，计数器加1
-            items = line.split('`') # 将行按照反引号分割，以便提取语言标识符
+            items = line.split('`')     # 将行按照反引号分割，以便提取语言标识符
             # 根据count的奇偶决定是开始新的代码块还是结束当前代码块
             if count % 2 == 1:  # 如果是奇数，表示是代码块的开始，
                 lines[i] = f'<pre><code class="language-{items[-1]}">'  # 替换改行内容为HTML的<pre><code>标签，并添加相应的语言类
@@ -111,9 +111,16 @@ def parse_text(text):
     return text     # 返回最终的HTML格式字符串
 
 
-#
+# 整体作用是实现流式生成对话回复，能够根据用户的历史对话动态生成并返回结果，适合于需要实时交互的聊天应用
 def predict(history, max_length, top_p, temperature):
-    stop = StopOnTokens()
+    # history代表之前的对话历史，通常是一个列表，包含用户和模型的信息
+    # max_length指定生成回复的最大长度
+    # top_p表示用于控制成成是的随机性（核采样），越小则生成的结果越集中
+    # temperature表示控制生成结果的多样性，值越高，生成的结果越随机
+
+    stop = StopOnTokens()   # 创建一个停止标准实例，用于在生成时判断何时停止
+    # 构建列表消息
+    # 使用循环遍历history构造一个适合模型输入的message列表。如果是历史的最后一条用户消息且没有模型回复，直接将用户消息添加到message
     messages = []
     for idx, (user_msg, model_msg) in enumerate(history):
         if idx == len(history) - 1 and not model_msg:
@@ -123,12 +130,14 @@ def predict(history, max_length, top_p, temperature):
             messages.append({"role": "user", "content": user_msg})
         if model_msg:
             messages.append({"role": "assistant", "content": model_msg})
-
+    # 将message转化为模型输入格式，添加必要的生成信息，将其转化为pytorch张量，移动到模型的设备商
     model_inputs = tokenizer.apply_chat_template(messages,
                                                  add_generation_prompt=True,
                                                  tokenize=True,
                                                  return_tensors="pt").to(next(model.parameters()).device)
+    # 创建生成流，创建一个文本流处理器，允许在生成过程中逐步接收新的token
     streamer = TextIteratorStreamer(tokenizer, timeout=60, skip_prompt=True, skip_special_tokens=True)
+    # 生成参数配置
     generate_kwargs = {
         "input_ids": model_inputs,
         "streamer": streamer,
@@ -140,14 +149,17 @@ def predict(history, max_length, top_p, temperature):
         "repetition_penalty": 1.2,
         "eos_token_id": model.config.eos_token_id,
     }
+    # 启动生成线程，在新的线程中启动模型的生成过程，这样可以非阻塞地进行生成
     t = Thread(target=model.generate, kwargs=generate_kwargs)
     t.start()
-    for new_token in streamer:
+    # 逐步输出生成内容
+    for new_token in streamer:  # 迭代生成新的token ，如果收到新的token ，则将其添加到历史对话的最后一条模型消息中。
         if new_token:
             history[-1][1] += new_token
-        yield history
+        yield history   # 逐步返回更新后的历史，允许外部调用者实时获取生成的回复
 
 
+# gradio库创建一个界面
 with gr.Blocks() as demo:
     gr.HTML("""<h1 align="center">GLM-4-9B Gradio Simple Chat Demo</h1>""")
     chatbot = gr.Chatbot()
@@ -176,4 +188,3 @@ with gr.Blocks() as demo:
 
 demo.queue()
 demo.launch(server_name="0.0.0.0", server_port=8035, inbrowser=True, share=True)
-
