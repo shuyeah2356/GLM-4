@@ -1,3 +1,12 @@
+# 运行代码
+- 下载模型到指定路径
+- 安装包，在requirements.txt中
+  - # torch>=2.4.0
+  - # torchvision>=0.19.0
+
+```shell
+pip install -r requirements.txt
+```
 # Basic Demo
 
 Read this in [English](README_en.md).
